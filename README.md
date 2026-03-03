@@ -1,4 +1,4 @@
-# Graph Neural Network for Molecular Solubility Prediction (ESOL)
+# Graph Neural Network (PyTorch Geometric) for molecular solubility prediction using the ESOL dataset.
 
 ## Overview
 
