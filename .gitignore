@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Conda
+env/
+.conda/
+
+# Data
+data/processed/
+
+# Mac
+.DS_Store
+
+# Results (optional, keep figures but not models)
+results/models/

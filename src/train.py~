@@ -1,0 +1,100 @@
+# src/train.py
+import os
+import torch
+from torch_geometric.loader import DataLoader
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+from .dataset import ESOLDataset
+from .models import SolubilityGNN
+from .utils import split_dataset, compute_metrics
+
+def train_one_epoch(model, loader, optimizer, device):
+    model.train()
+    loss_fn = nn.MSELoss()
+    total_loss = 0.0
+
+    for batch in loader:
+        batch = batch.to(device)
+        optimizer.zero_grad()
+        out = model(batch.x, batch.edge_index, batch.batch)
+        loss = loss_fn(out, batch.y.view(-1))
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * batch.num_graphs
+
+    return total_loss / len(loader.dataset)
+
+def eval_model(model, loader, device):
+    model.eval()
+    ys = []
+    preds = []
+
+    with torch.no_grad():
+        for batch in loader:
+            batch = batch.to(device)
+            out = model(batch.x, batch.edge_index, batch.batch)
+            ys.extend(batch.y.view(-1).cpu().numpy())
+            preds.extend(out.cpu().numpy())
+
+    metrics = compute_metrics(ys, preds)
+    return metrics
+
+def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
+
+    # Load dataset
+    dataset = ESOLDataset(root="data")
+
+    # Split
+    train_dataset, val_dataset, test_dataset = split_dataset(dataset)
+
+    # DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+    # Model
+    sample_data = dataset[0]
+    in_channels = sample_data.x.shape[1]
+
+    model = SolubilityGNN(in_channels=in_channels, hidden_channels=64, num_layers=3)
+    model.to(device)
+
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+    best_val_rmse = float("inf")
+    best_state_dict = None
+
+    n_epochs = 80
+
+    for epoch in range(1, n_epochs + 1):
+        train_loss = train_one_epoch(model, train_loader, optimizer, device)
+        val_metrics = eval_model(model, val_loader, device)
+        val_rmse = val_metrics["rmse"]
+        val_r2 = val_metrics["r2"]
+
+        print(
+            f"Epoch {epoch:03d}: "
+            f"train_loss={train_loss:.4f}, "
+            f"val_rmse={val_rmse:.4f}, val_r2={val_r2:.4f}"
+        )
+
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            best_state_dict = model.state_dict()
+
+    # Save best model
+    os.makedirs("results/models", exist_ok=True)
+    save_path = "results/models/best_model.pt"
+    torch.save(best_state_dict, save_path)
+    print(f"Saved best model to {save_path} (val RMSE={best_val_rmse:.4f})")
+
+    # Evaluate on test set
+    model.load_state_dict(best_state_dict)
+    test_metrics = eval_model(model, test_loader, device)
+    print("Test metrics:", test_metrics)
+
+if __name__ == "__main__":
+    main()

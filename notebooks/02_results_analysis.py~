@@ -1,0 +1,71 @@
+import os
+import sys
+
+import torch
+from torch_geometric.loader import DataLoader
+import matplotlib.pyplot as plt
+from src.dataset import ESOLDataset
+from src.models import SolubilityGNN
+from src.utils import split_dataset
+
+# Make sure output directory exists
+os.makedirs("results/figures", exist_ok=True)
+
+plt.figure(figsize=(6, 6))
+plt.scatter(ys, preds, alpha=0.7)
+plt.xlabel("True logS")
+plt.ylabel("Predicted logS")
+
+# Diagonal reference line
+min_val = min(min(ys), min(preds))
+max_val = max(max(ys), max(preds))
+plt.plot([min_val, max_val], [min_val, max_val], linestyle="--")
+
+plt.title("ESOL: True vs Predicted logS")
+
+# Save BEFORE show()
+plt.savefig("results/figures/pred_vs_true.png", dpi=300, bbox_inches="tight")
+
+plt.show()
+
+
+
+# Allow imports from the project root (one level up from /notebooks)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"  # optional, but helps avoid oversubscription
+
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+dataset = ESOLDataset(root="data")
+train_dataset, val_dataset, test_dataset = split_dataset(dataset)
+test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+sample_data = dataset[0]
+in_channels = sample_data.x.shape[1]
+
+model = SolubilityGNN(in_channels=in_channels)
+model.load_state_dict(torch.load("results/models/best_model.pt"))
+model.to(device)
+model.eval()
+
+ys = []
+preds = []
+
+with torch.no_grad():
+    for batch in test_loader:
+        batch = batch.to(device)
+        out = model(batch.x, batch.edge_index, batch.batch)
+        ys.extend(batch.y.view(-1).cpu().numpy())
+        preds.extend(out.cpu().numpy())
+
+plt.figure()
+plt.scatter(ys, preds, alpha=0.7)
+plt.xlabel("True logS")
+plt.ylabel("Predicted logS")
+plt.plot([min(ys), max(ys)], [min(ys), max(ys)])
+plt.title("ESOL: True vs Predicted logS")
+plt.show()
